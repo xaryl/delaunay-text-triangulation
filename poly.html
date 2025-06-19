@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Delaunay Text Triangulation</title>
+    <style>
+        @font-face {
+            font-family: 'Custom';
+            src: url('Custom.ttf') format('truetype');
+        }
+
+        .font-trigger {
+            font-family: 'Custom';
+            position: absolute;
+            left: -9999px;
+        }
+
+        body {
+            font-family: sans-serif;
+            background-color: #f0f0f0;
+            padding: 10px 20px;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+
+        #controls-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+            background-color: #e9e9e9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            font-size: 12px;
+            margin-bottom: 4px;
+            color: #333;
+        }
+
+        .control-group input {
+            width: 70px;
+            padding: 5px;
+        }
+
+        .control-group input[type="text"] {
+            width: 120px;
+        }
+
+        .control-group small {
+            font-size: 11px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        #update-btn {
+            padding: 10px 15px;
+            font-weight: bold;
+            cursor: pointer;
+            border: 1px solid #333;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            align-self: flex-end;
+        }
+
+        #update-btn:hover {
+            background-color: #45a049;
+        }
+
+        #main-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        #output-wrapper {
+            position: relative;
+        }
+
+        #polygon-output {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            width: 450px;
+            height: 500px;
+            resize: none;
+        }
+
+        #copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 20px;
+            padding: 4px 8px;
+            font-size: 12px;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #copy-btn:hover {
+            background-color: #e0e0e0;
+        }
+    </style>
+</head>
+
+<body>
+    <span class="font-trigger">.</span>
+    <h1>Delaunay Text Triangulation</h1>
+    <p>
+        <b>Triangle Count:</b> <span id="triangle-count-display">0</span>
+    </p>
+
+    <div id="controls-container">
+        <div class="control-group">
+            <label for="canvas-text">Canvas Text</label>
+            <input type="text" id="canvas-text" value="KPI">
+        </div>
+        <div class="control-group">
+            <label for="canvas-width">Canvas Width</label>
+            <input type="number" id="canvas-width" value="450" min="50">
+        </div>
+        <div class="control-group">
+            <label for="canvas-height">Canvas Height</label>
+            <input type="number" id="canvas-height" value="180" min="50">
+        </div>
+        <div class="control-group">
+            <label for="font-size">Font Size</label>
+            <input type="number" id="font-size" value="245" min="20">
+        </div>
+        <div class="control-group">
+            <label for="text-y-pos">Text Y Position</label>
+            <input type="number" id="text-y-pos" value="175">
+            <small>Higher = lower on canvas</small>
+        </div>
+        <div class="control-group">
+            <label for="precision-x">Precision X</label>
+            <input type="number" id="precision-x" value="20" min="1">
+            <small>Higher = less detail</small>
+        </div>
+        <div class="control-group">
+            <label for="precision-y">Precision Y</label>
+            <input type="number" id="precision-y" value="20" min="1">
+            <small>Higher = less detail</small>
+        </div>
+        <button id="update-btn">Update</button>
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/d3-delaunay@6"></script>
+
+    <script>
+        let canvas, ctx, outputTextarea;
+
+        function setup() {
+            let mainContainer = document.createElement('div');
+            mainContainer.id = "main-container";
+
+            canvas = document.createElement('canvas');
+
+            const outputWrapper = document.createElement('div');
+            outputWrapper.id = "output-wrapper";
+
+            outputTextarea = document.createElement('textarea');
+            outputTextarea.id = "polygon-output";
+            outputTextarea.readOnly = true;
+
+            const copyBtn = document.createElement('button');
+            copyBtn.id = "copy-btn";
+            copyBtn.textContent = "Copy";
+
+            outputWrapper.appendChild(outputTextarea);
+            outputWrapper.appendChild(copyBtn);
+
+            mainContainer.appendChild(canvas);
+            mainContainer.appendChild(outputWrapper);
+            document.body.appendChild(mainContainer);
+
+            ctx = canvas.getContext("2d");
+
+            document.getElementById('update-btn').addEventListener('click', runTriangulation);
+
+            copyBtn.addEventListener('click', () => {
+                const textToCopy = outputTextarea.value;
+                if (!textToCopy) return;
+
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => {
+                        copyBtn.textContent = 'Copy';
+                    }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                });
+            });
+
+            runTriangulation();
+        }
+
+        function runTriangulation() {
+            const canvasText = document.getElementById('canvas-text').value || "TEXT";
+            const width = parseInt(document.getElementById('canvas-width').value) || 450;
+            const height = parseInt(document.getElementById('canvas-height').value) || 180;
+            const fontSize = parseInt(document.getElementById('font-size').value) || 245;
+            const textYPosition = parseInt(document.getElementById('text-y-pos').value) || (height - 5);
+            const precisionX = parseInt(document.getElementById('precision-x').value) || 20;
+            const precisionY = parseInt(document.getElementById('precision-y').value) || 20;
+
+            canvas.width = width;
+            canvas.height = height;
+
+            outputTextarea.value = "Generating polygon data... please wait.";
+            document.getElementById('triangle-count-display').textContent = '...';
+
+            const Delaunay = d3.Delaunay;
+            let vertices = [];
+
+            ctx.font = `${fontSize}px Custom`;
+            ctx.textAlign = "center";
+            ctx.fillText(canvasText, width / 2, textYPosition);
+
+            let imageData = ctx.getImageData(0, 0, width, height);
+            let pixels = imageData.data;
+
+            function isOpaque(v0, v1, v2) {
+                if (!v0 || !v1 || !v2) return false;
+                let x = parseInt((v0[0] + v1[0] + v2[0]) / 3);
+                let y = parseInt((v0[1] + v1[1] + v2[1]) / 3);
+                if (x < 0 || x >= width || y < 0 || y >= height) return false;
+                let pixelIndex = (y * width + x) * 4;
+                return pixels[pixelIndex + 3] > 200;
+            }
+
+            function addVertex(x, y) {
+                vertices.push([x, y]);
+            }
+
+            let filled = false;
+            for (let i = 0; i < height; i += precisionY) {
+                for (let j = 0; j < width; j++) {
+                    let pixelIndex = (i * width + j) * 4;
+                    if (pixels[pixelIndex + 3] > 200) {
+                        if (!filled) { addVertex(j, i); filled = true; }
+                    } else { if (filled) { addVertex(j - 1, i); filled = false; } }
+                }
+                filled = false;
+            }
+
+            filled = false;
+            for (let i = 0; i < width; i += precisionX) {
+                for (let j = 0; j < height; j++) {
+                    let pixelIndex = (j * width + i) * 4;
+                    if (pixels[pixelIndex + 3] > 200) {
+                        if (!filled) { addVertex(i, j); filled = true; }
+                    } else { if (filled) { addVertex(i, j - 1); filled = false; } }
+                }
+                filled = false;
+            }
+
+            if (vertices.length < 3) {
+                outputTextarea.value = "Not enough vertices to create triangles. Try decreasing precision or increasing font size.";
+                document.getElementById('triangle-count-display').textContent = '0';
+                ctx.clearRect(0, 0, width, height);
+                return;
+            }
+
+            const delaunay = Delaunay.from(vertices);
+            const indices = delaunay.triangles;
+
+            ctx.clearRect(0, 0, width, height);
+            let polygonStrings = [];
+            ctx.fillStyle = "#000000";
+            let l = indices.length / 3, v0, v1, v2;
+
+            for (let i = 0; i < l; i++) {
+                v0 = vertices[indices[i * 3]];
+                v1 = vertices[indices[i * 3 + 1]];
+                v2 = vertices[indices[i * 3 + 2]];
+
+                if (isOpaque(v0, v1, v2)) {
+                    ctx.beginPath();
+                    ctx.moveTo(v0[0], v0[1]);
+                    ctx.lineTo(v1[0], v1[1]);
+                    ctx.lineTo(v2[0], v2[1]);
+                    ctx.fill();
+
+                    const p0x = (v0[0] / width * 100).toFixed(2);
+                    const p0y = (v0[1] / height * 100).toFixed(2);
+                    const p1x = (v1[0] / width * 100).toFixed(2);
+                    const p1y = (v1[1] / height * 100).toFixed(2);
+                    const p2x = (v2[0] / width * 100).toFixed(2);
+                    const p2y = (v2[1] / height * 100).toFixed(2);
+
+                    const polygonString = `polygon(${p0x}% ${p0y}%, ${p1x}% ${p1y}%, ${p2x}% ${p2y}%),`;
+                    polygonStrings.push(polygonString);
+                }
+            }
+
+            document.getElementById('triangle-count-display').textContent = polygonStrings.length;
+            outputTextarea.value = polygonStrings.join('\n');
+        }
+
+        document.fonts.ready.then(setup);
+    </script>
+</body>
+
+</html>
